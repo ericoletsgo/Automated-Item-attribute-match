@@ -1,0 +1,30 @@
+model:
+  name: microsoft/Florence-2-large
+  lora_rank: 32
+  lora_alpha: 64
+  lora_target_modules:
+    - q_proj
+    - v_proj
+    - k_proj
+    - o_proj
+  lora_dropout: 0.05
+
+training:
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-5
+  warmup_steps: 500
+  max_steps: 10000
+  fp16: true
+  optimizer: adamw_torch
+  scheduler: cosine
+  save_steps: 1000
+  eval_steps: 500
+  logging_steps: 50
+
+data:
+  max_seq_length: 512
+  image_size: 768
+  train_split: data/splits/train.json
+  val_split: data/splits/val.json
+  test_split: data/splits/test.json

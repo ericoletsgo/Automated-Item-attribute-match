@@ -1,0 +1,8 @@
+[project]
+name = "product-matcher"
+version = "0.1.0"
+description = "Automated AI product attribute extraction and similarity matching"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

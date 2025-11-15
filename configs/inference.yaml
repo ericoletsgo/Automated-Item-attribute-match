@@ -1,0 +1,16 @@
+florence2:
+  model_path: checkpoints/florence2-lora
+  base_model: microsoft/Florence-2-large
+  device: cuda
+  max_new_tokens: 256
+
+embedder:
+  model_path: checkpoints/contrastive
+  backbone: google/siglip-base-patch16-224
+  device: cuda
+
+search:
+  index_path: data/faiss_index
+  metadata_path: data/metadata.db
+  top_k: 10
+  nprobe: 16

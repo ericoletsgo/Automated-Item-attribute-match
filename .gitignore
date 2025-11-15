@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+
+# data
+data/raw/images/
+data/faiss_index
+data/metadata.db
+
+# model checkpoints
+checkpoints/
+
+# results
+results/
+
+# IDE
+.vscode/
+.idea/
+
+# wandb
+wandb/
