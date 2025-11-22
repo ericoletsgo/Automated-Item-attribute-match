@@ -69,9 +69,9 @@ class Florence2Extractor:
             image = Image.open(image).convert("RGB")
 
         if entity_name:
-            prompt = f"<OCR> Extract the {entity_name} from this product image."
+            prompt = "<OCR>"
         else:
-            prompt = "<OCR> Extract all product attributes from this image."
+            prompt = "<OCR>"
 
         inputs = self.processor(text=prompt, images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}

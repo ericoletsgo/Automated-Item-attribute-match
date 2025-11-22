@@ -31,16 +31,13 @@ class Florence2Dataset(Dataset):
         except Exception:
             image = Image.new("RGB", (768, 768))
 
-        prompt = f"<OCR> Extract the {record['entity_name']} from this product image."
+        prompt = "<OCR>"
         target = f"{record['value']} {record['unit']}"
 
         inputs = self.processor(
             text=prompt,
             images=image,
             return_tensors="pt",
-            padding="max_length",
-            max_length=512,
-            truncation=True,
         )
 
         labels = self.processor.tokenizer(
