@@ -19,7 +19,7 @@ training:
   optimizer: adamw_torch
   scheduler: cosine
   save_steps: 1000
-  eval_steps: 500
+  eval_steps: 1000
   logging_steps: 50
 
 data:

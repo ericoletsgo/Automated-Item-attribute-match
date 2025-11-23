@@ -158,7 +158,7 @@ def save_checkpoint(model, optimizer, scheduler, global_step, best_val_loss):
 
 
 @torch.no_grad()
-def evaluate(model, dataloader, device):
+def evaluate(model, dataloader, device, max_batches=50):
     model.eval()
     total_loss = 0
     count = 0
@@ -166,6 +166,8 @@ def evaluate(model, dataloader, device):
     for batch in dataloader:
         if batch is None:
             continue
+        if count >= max_batches:
+            break
         batch = {k: v.to(device) for k, v in batch.items()}
         try:
             with torch.amp.autocast("cuda"):
