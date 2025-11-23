@@ -49,14 +49,15 @@ def train(config_path="configs/contrastive.yaml"):
         train_dataset,
         batch_size=config["training"]["batch_size"],
         shuffle=True,
-        num_workers=config["data"]["num_workers"],
+        num_workers=0,
         pin_memory=True,
         drop_last=True,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=config["training"]["batch_size"],
-        num_workers=config["data"]["num_workers"],
+        num_workers=0,
+        drop_last=True,
     )
 
     # stage 1: only projection head

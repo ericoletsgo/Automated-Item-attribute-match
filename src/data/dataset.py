@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pad_sequence
 from PIL import Image
 
 
@@ -43,12 +44,11 @@ class Florence2Dataset(Dataset):
         labels = self.processor.tokenizer(
             target,
             return_tensors="pt",
-            padding="max_length",
             max_length=64,
+            padding="max_length",
             truncation=True,
         )
 
-        # squeeze batch dim since dataloader adds it
         return {
             "input_ids": inputs["input_ids"].squeeze(0),
             "attention_mask": inputs["attention_mask"].squeeze(0),
@@ -65,6 +65,28 @@ class Florence2Dataset(Dataset):
         return f"{url_hash}.{ext}"
 
 
+def florence2_collate_fn(batch):
+    """Custom collate that pads input_ids and attention_mask to same length."""
+    batch = [b for b in batch if b is not None]
+    if not batch:
+        return None
+
+    # pad input_ids and attention_mask to max length in batch
+    input_ids = pad_sequence([b["input_ids"] for b in batch], batch_first=True, padding_value=1)
+    attention_mask = pad_sequence([b["attention_mask"] for b in batch], batch_first=True, padding_value=0)
+
+    # pixel_values and labels are already fixed size
+    pixel_values = torch.stack([b["pixel_values"] for b in batch])
+    labels = torch.stack([b["labels"] for b in batch])
+
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "pixel_values": pixel_values,
+        "labels": labels,
+    }
+
+
 class ContrastiveDataset(Dataset):
     """Dataset for contrastive learning with product images."""
 
@@ -74,7 +96,6 @@ class ContrastiveDataset(Dataset):
         self.image_dir = Path(image_dir)
         self.transform = transform
 
-        # group records by entity_name for building positive pairs
         self.groups = {}
         for i, r in enumerate(self.records):
             key = r["entity_name"]
@@ -82,7 +103,6 @@ class ContrastiveDataset(Dataset):
                 self.groups[key] = []
             self.groups[key].append(i)
 
-        # create numeric labels from entity_name
         entity_names = sorted(set(r["entity_name"] for r in self.records))
         self.label_map = {name: i for i, name in enumerate(entity_names)}
 

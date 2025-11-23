@@ -17,14 +17,19 @@ class Florence2Extractor:
         self.processor = AutoProcessor.from_pretrained(base_model, trust_remote_code=True)
 
         if model_path:
-            # load fine-tuned LoRA weights
             base = AutoModelForCausalLM.from_pretrained(
-                base_model, trust_remote_code=True, torch_dtype=torch.float16
+                base_model,
+                trust_remote_code=True,
+                torch_dtype=torch.float16,
+                attn_implementation="sdpa",
             )
             self.model = PeftModel.from_pretrained(base, model_path)
         else:
             self.model = AutoModelForCausalLM.from_pretrained(
-                base_model, trust_remote_code=True, torch_dtype=torch.float16
+                base_model,
+                trust_remote_code=True,
+                torch_dtype=torch.float16,
+                attn_implementation="sdpa",
             )
 
         self.model.to(self.device)
@@ -37,6 +42,7 @@ class Florence2Extractor:
             config["model"]["name"],
             trust_remote_code=True,
             torch_dtype=torch.float16,
+            attn_implementation="sdpa",
         )
         processor = AutoProcessor.from_pretrained(
             config["model"]["name"], trust_remote_code=True
@@ -56,22 +62,10 @@ class Florence2Extractor:
 
     @torch.no_grad()
     def extract(self, image, entity_name=None):
-        """Extract attributes from a product image.
-
-        Args:
-            image: PIL Image or path
-            entity_name: specific attribute to extract, or None for all
-
-        Returns:
-            dict with extracted entity name, value, and unit
-        """
         if isinstance(image, str):
             image = Image.open(image).convert("RGB")
 
-        if entity_name:
-            prompt = "<OCR>"
-        else:
-            prompt = "<OCR>"
+        prompt = "<OCR>"
 
         inputs = self.processor(text=prompt, images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
@@ -87,7 +81,6 @@ class Florence2Extractor:
         return self._parse_output(output_text, entity_name)
 
     def _parse_output(self, text, entity_name=None):
-        """Parse model output into structured format."""
         import re
         text = text.strip()
 
