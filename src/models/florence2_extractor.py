@@ -70,12 +70,13 @@ class Florence2Extractor:
         inputs = self.processor(text=prompt, images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        generated = self.model.generate(
-            **inputs,
-            max_new_tokens=256,
-            num_beams=3,
-            early_stopping=True,
-        )
+        with torch.amp.autocast("cuda"):
+            generated = self.model.generate(
+                **inputs,
+                max_new_tokens=256,
+                num_beams=3,
+                early_stopping=True,
+            )
 
         output_text = self.processor.batch_decode(generated, skip_special_tokens=True)[0]
         return self._parse_output(output_text, entity_name)
