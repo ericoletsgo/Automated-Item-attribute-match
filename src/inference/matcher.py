@@ -38,7 +38,7 @@ class ProductMatcher:
             metadata = self._get_metadata(int(idx))
             results.append({
                 "index": int(idx),
-                "similarity": float(1 - dist),
+                "similarity": float(dist),
                 "metadata": metadata,
             })
 

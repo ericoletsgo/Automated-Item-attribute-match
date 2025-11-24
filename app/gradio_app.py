@@ -4,6 +4,7 @@ Upload product photos to auto-extract specs, find matching listings, or compare 
 """
 
 import json
+import hashlib
 from pathlib import Path
 
 import gradio as gr
@@ -14,10 +15,10 @@ from PIL import Image
 
 pipeline = None
 DEMO_MODE = True
+IMAGE_DIR = Path("data/raw/images")
 
 
 def load_pipeline():
-    """Load models if checkpoints exist, otherwise run in demo mode."""
     global pipeline, DEMO_MODE
 
     florence2_path = Path("checkpoints/florence2-lora")
@@ -35,127 +36,179 @@ def load_pipeline():
             device="cuda",
         )
         DEMO_MODE = False
+        print("Models loaded successfully.")
     else:
-        print("Checkpoints not found. Running in demo mode with placeholder outputs.")
+        missing = [str(p) for p in [florence2_path, embedder_path, index_path, metadata_path] if not p.exists()]
+        print(f"Missing: {missing}. Running in demo mode.")
         DEMO_MODE = True
 
 
+def _url_to_image_path(url):
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    ext = url.split(".")[-1].split("?")[0]
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        ext = "jpg"
+    return IMAGE_DIR / f"{url_hash}.{ext}"
+
+
 def extract_attributes(image):
-    """Extract product attributes from uploaded image."""
     if image is None:
-        return "Please upload an image."
+        return "Upload an image first."
 
     if DEMO_MODE:
-        return json.dumps({
-            "item_weight": {"value": 1.5, "unit": "kilogram", "raw": "1.5 kilogram"},
-            "height": {"value": 25.4, "unit": "centimetre", "raw": "25.4 centimetre"},
-            "note": "Demo mode - train models to get real predictions",
-        }, indent=2)
+        return json.dumps({"note": "Demo mode - no model loaded", "example": {"value": 1.5, "unit": "kilogram"}}, indent=2)
 
-    results = pipeline.extractor.extract_all(image)
-    return json.dumps(results, indent=2)
+    result = pipeline.extractor.extract_all(image)
+
+    if result["value"] is not None:
+        output = {
+            "extracted_text": result["raw"],
+            "value": result["value"],
+            "unit": result["unit"],
+        }
+    else:
+        output = {
+            "extracted_text": result["raw"],
+            "note": "Could not parse a numeric value from this image",
+        }
+
+    return json.dumps(output, indent=2)
 
 
 def find_similar(image):
-    """Find similar products in the index."""
     if image is None:
-        return [], "Please upload an image."
+        return [], "Upload an image first."
 
     if DEMO_MODE:
-        return [], "Demo mode - build FAISS index to enable similarity search."
+        return [], "Demo mode - build FAISS index to enable search."
 
     results = pipeline.matcher.find_similar(image, top_k=10)
 
     gallery_images = []
     table_data = []
-    for r in results:
+
+    for i, r in enumerate(results):
         meta = r["metadata"]
+        img_url = meta.get("image_path", "")
+
+        img_path = _url_to_image_path(img_url) if img_url else None
+        if img_path and img_path.exists():
+            try:
+                pil_img = Image.open(img_path).convert("RGB")
+                gallery_images.append((pil_img, f"#{i+1} ({r['similarity']:.3f})"))
+            except Exception:
+                pass
+
         table_data.append({
-            "rank": len(table_data) + 1,
-            "similarity": f"{r['similarity']:.3f}",
-            "entity": meta.get("entity_name", ""),
-            "value": f"{meta.get('value', '')} {meta.get('unit', '')}",
+            "Rank": i + 1,
+            "Similarity": f"{r['similarity']:.3f}",
+            "Category": meta.get("entity_name", ""),
+            "Value": f"{meta.get('value', '')} {meta.get('unit', '')}".strip(),
         })
 
-    df = pd.DataFrame(table_data)
+    df = pd.DataFrame(table_data) if table_data else pd.DataFrame()
     return gallery_images, df
 
 
 def compare_products(image_a, image_b):
-    """Compare two product images."""
     if image_a is None or image_b is None:
-        return "Please upload both images.", ""
+        return "Upload both images.", ""
 
     if DEMO_MODE:
-        demo_comparison = [
-            {"attribute": "item_weight", "product_a": "1.5 kilogram", "product_b": "2.0 kilogram", "match": False},
-            {"attribute": "height", "product_a": "25.4 cm", "product_b": "25.4 cm", "match": True},
-        ]
-        df = pd.DataFrame(demo_comparison)
-        return df, "Similarity: 0.82 (Demo mode)"
+        return pd.DataFrame(), "Demo mode"
 
-    result = pipeline.compare(image_a, image_b)
-    df = pd.DataFrame(result["comparison"])
-    score_html = f"<h3>Overall Similarity: {result['similarity_score']:.2%}</h3>"
+    emb_a = pipeline.matcher.embedder.embed_image(image_a)
+    emb_b = pipeline.matcher.embedder.embed_image(image_b)
+    similarity = float((emb_a @ emb_b).item())
+
+    result_a = pipeline.extractor.extract_all(image_a)
+    result_b = pipeline.extractor.extract_all(image_b)
+
+    comparison = [{
+        "": "Extracted Text",
+        "Product A": result_a.get("raw", "N/A"),
+        "Product B": result_b.get("raw", "N/A"),
+    }, {
+        "": "Parsed Value",
+        "Product A": f"{result_a.get('value', 'N/A')} {result_a.get('unit', '')}".strip(),
+        "Product B": f"{result_b.get('value', 'N/A')} {result_b.get('unit', '')}".strip(),
+    }]
+
+    df = pd.DataFrame(comparison)
+
+    if similarity > 0.85:
+        verdict = "Likely the same product"
+    elif similarity > 0.65:
+        verdict = "Similar products"
+    else:
+        verdict = "Different products"
+
+    score_html = f"<h3>Embedding Similarity: {similarity:.2%} — {verdict}</h3>"
     return df, score_html
 
 
 def build_app():
-    """Create the Gradio interface."""
-    with gr.Blocks(
-        title="Product Matcher",
-        theme=gr.themes.Soft(),
-    ) as app:
+    with gr.Blocks(title="Product Matcher") as app:
         gr.Markdown("# Product Matcher")
-        gr.Markdown("Upload a product image to automatically extract its specifications, find matching listings, or check if two items are the same product.")
+        gr.Markdown("Upload product images to extract specs, find matching listings, or compare items. "
+                     "Powered by fine-tuned Florence-2 (LoRA) for OCR and SigLIP contrastive embeddings for similarity.")
 
-        with gr.Tab("Auto-Extract Specs"):
-            gr.Markdown("Upload a product photo to pull out weight, dimensions, voltage, and other specs automatically.")
+        with gr.Tab("Extract Specs"):
+            gr.Markdown("Upload a product photo to read weight, dimensions, voltage, or other specs from the image.")
             with gr.Row():
                 with gr.Column():
                     img_input = gr.Image(type="pil", label="Product Photo")
-                    extract_btn = gr.Button("Extract Specs", variant="primary")
+                    extract_btn = gr.Button("Extract", variant="primary")
                 with gr.Column():
-                    attr_output = gr.JSON(label="Detected Specifications")
-
+                    attr_output = gr.JSON(label="Extracted Attributes")
             extract_btn.click(fn=extract_attributes, inputs=img_input, outputs=attr_output)
 
-        with gr.Tab("Find Matching Listings"):
-            gr.Markdown("Upload a product photo to find the same or similar items across the catalog.")
+        with gr.Tab("Find Similar"):
+            gr.Markdown("Upload a product photo to find the most similar items in the catalog (182k indexed products).")
             with gr.Row():
-                with gr.Column():
-                    query_img = gr.Image(type="pil", label="Product Photo")
-                    search_btn = gr.Button("Search Matches", variant="primary")
-                with gr.Column():
-                    results_gallery = gr.Gallery(label="Matching Products", columns=5)
-                    results_table = gr.Dataframe(label="Match Results")
-
+                with gr.Column(scale=1):
+                    query_img = gr.Image(type="pil", label="Query Image")
+                    search_btn = gr.Button("Search", variant="primary")
+                with gr.Column(scale=2):
+                    results_gallery = gr.Gallery(label="Top Matches", columns=5, height=400)
+                    results_table = gr.Dataframe(label="Match Details")
             search_btn.click(fn=find_similar, inputs=query_img, outputs=[results_gallery, results_table])
 
-        with gr.Tab("Compare Items"):
-            gr.Markdown("Upload two product images to check if they are the same item and see how their specs differ.")
+        with gr.Tab("Compare"):
+            gr.Markdown("Upload two product images to check similarity and compare extracted specs.")
             with gr.Row():
                 img_a = gr.Image(type="pil", label="Product A")
                 img_b = gr.Image(type="pil", label="Product B")
             compare_btn = gr.Button("Compare", variant="primary")
-            comparison_table = gr.Dataframe(label="Spec Comparison")
             similarity_html = gr.HTML()
-
+            comparison_table = gr.Dataframe(label="Attribute Comparison")
             compare_btn.click(
                 fn=compare_products,
                 inputs=[img_a, img_b],
                 outputs=[comparison_table, similarity_html],
             )
 
-        with gr.Tab("Model Benchmarks"):
-            gr.Markdown("## Extraction Accuracy Comparison")
-            gr.Markdown("How the fine-tuned Florence-2 model compares to PaddleOCR and Claude Vision on the test set.")
+        with gr.Tab("Training Results"):
+            gr.Markdown("## Model Training Summary")
+            gr.Markdown("""
+### Florence-2 (Attribute Extraction)
+- **Model**: microsoft/Florence-2-large with LoRA (rank 32, 0.9% trainable params)
+- **Training**: 10,000 steps, batch 4 × 8 gradient accumulation = effective 32
+- **Final loss**: 2.03 (train), 2.00 (val)
+- **Hardware**: NVIDIA T4, ~3.5 hours
 
-            benchmark_path = Path("results/benchmark_results.json")
-            if benchmark_path.exists():
-                with open(benchmark_path) as f:
-                    bench_data = json.load(f)
-                gr.JSON(value=bench_data, label="Benchmark Results")
+### SigLIP Contrastive (Product Similarity)
+- **Model**: google/siglip-base-patch16-224 + projection head (768→512→256)
+- **Training**: 12 epochs (3 frozen + 9 fine-tuned), SupCon loss
+- **Final loss**: 4.54 (train), 4.52 (val) — theoretical floor ~4.84
+- **Hardware**: NVIDIA T4, ~24 hours
+
+### FAISS Index
+- **Vectors**: 182,408 product embeddings (256-d)
+- **Index type**: IVFFlat with inner product similarity
+
+[View W&B training runs](https://wandb.ai/ericnie12310-university-of-waterloo/product-matcher)
+""")
 
     return app
 
