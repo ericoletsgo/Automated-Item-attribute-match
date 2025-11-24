@@ -4,13 +4,18 @@ Stage 1: train projection head only backbone frozen
 Stage 2: unfreeze last N backbone layers, fine-tune end-to-end
 """
 
+import time
 import yaml
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from tqdm import tqdm
 import wandb
+
+
+def log(msg):
+    ts = time.strftime("%H:%M:%S")
+    print(f"[{ts}] {msg}", flush=True)
 
 from src.models.clip_embedder import ProductEmbedder
 from src.models.contrastive_head import SupConLoss
@@ -68,17 +73,16 @@ def train(config_path="configs/contrastive.yaml"):
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=config["training"]["stage1_epochs"])
 
-    print("Stage 1: training projection head only")
+    log(f"Stage 1: training projection head only ({config['training']['stage1_epochs']} epochs)")
     for epoch in range(config["training"]["stage1_epochs"]):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, epoch, "S1")
         val_loss = validate(model, val_loader, criterion, device)
         scheduler.step()
 
         wandb.log({"stage1/train_loss": train_loss, "stage1/val_loss": val_loss, "epoch": epoch})
-        print(f"Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+        log(f"S1 Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 
-    # stage 2: unfreeze backbone layers
-    print(f"\nStage 2: unfreezing last {config['model']['unfreeze_layers']} backbone layers")
+    log(f"Stage 2: unfreezing last {config['model']['unfreeze_layers']} backbone layers")
     model.unfreeze_backbone(config["model"]["unfreeze_layers"])
 
     all_params = [
@@ -93,26 +97,28 @@ def train(config_path="configs/contrastive.yaml"):
     best_val_loss = float("inf")
     for epoch in range(remaining_epochs):
         actual_epoch = epoch + config["training"]["stage1_epochs"]
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, actual_epoch, "S2")
         val_loss = validate(model, val_loader, criterion, device)
         scheduler.step()
 
         wandb.log({"stage2/train_loss": train_loss, "stage2/val_loss": val_loss, "epoch": actual_epoch})
-        print(f"Epoch {actual_epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+        log(f"S2 Epoch {actual_epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), "checkpoints/contrastive/best_model.pt")
+            log(f"  new best model saved (val_loss={val_loss:.4f})")
 
     wandb.finish()
-    print("Training complete.")
+    log("Training complete.")
 
 
-def train_epoch(model, loader, criterion, optimizer, device):
+def train_epoch(model, loader, criterion, optimizer, device, epoch=0, stage=""):
     model.train()
     total_loss = 0
+    num_batches = len(loader)
 
-    for images, labels in tqdm(loader, desc="Training"):
+    for i, (images, labels) in enumerate(loader):
         images = images.to(device)
         labels = labels.to(device)
 
@@ -125,7 +131,10 @@ def train_epoch(model, loader, criterion, optimizer, device):
 
         total_loss += loss.item()
 
-    return total_loss / len(loader)
+        if (i + 1) % 50 == 0 or (i + 1) == num_batches:
+            log(f"  {stage} Epoch {epoch} batch {i+1}/{num_batches} loss={loss.item():.4f}")
+
+    return total_loss / num_batches
 
 
 @torch.no_grad()
