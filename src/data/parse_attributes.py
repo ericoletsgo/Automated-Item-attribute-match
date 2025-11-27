@@ -107,7 +107,7 @@ def main():
     print(f"Loaded {len(df)} rows")
 
     records = build_records(df)
-    valid_records = [r for r in records if r["value"] is not None]
+    valid_records = [r for r in records if r["attributes"]]
     print(f"Valid records with parsed values: {len(valid_records)}/{len(records)}")
 
     train, val, test = create_splits(valid_records)
