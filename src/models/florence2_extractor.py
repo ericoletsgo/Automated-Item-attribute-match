@@ -3,10 +3,22 @@ Florence-2 model wrapper for product attribute extraction.
 Handles loading, LoRA setup, and inference.
 """
 
+import re
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 from peft import LoraConfig, get_peft_model, PeftModel
 from PIL import Image
+
+UNIT_PATTERNS = [
+    "kilogram", "kg", "gram", "g", "pound", "lb", "lbs", "ounce", "oz",
+    "milligram", "mg", "ton",
+    "centimetre", "centimeter", "cm", "millimetre", "millimeter", "mm",
+    "metre", "meter", "m", "inch", "in", "foot", "feet", "ft", "yard",
+    "volt", "v", "watt", "w", "ampere", "amp", "a",
+    "litre", "liter", "l", "millilitre", "milliliter", "ml",
+    "gallon", "gal", "quart", "qt", "pint", "pt", "cup",
+    "fluid ounce", "fl oz",
+]
 
 
 class Florence2Extractor:
@@ -61,30 +73,44 @@ class Florence2Extractor:
         return model, processor
 
     @torch.no_grad()
-    def extract(self, image, entity_name=None):
-        if isinstance(image, str):
-            image = Image.open(image).convert("RGB")
-
-        prompt = "<OCR>"
-
+    def _generate(self, image, prompt, max_tokens=256):
         inputs = self.processor(text=prompt, images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         with torch.amp.autocast("cuda"):
             generated = self.model.generate(
                 **inputs,
-                max_new_tokens=256,
+                max_new_tokens=max_tokens,
                 num_beams=3,
                 early_stopping=True,
             )
 
-        output_text = self.processor.batch_decode(generated, skip_special_tokens=True)[0]
-        return self._parse_output(output_text, entity_name)
+        return self.processor.batch_decode(generated, skip_special_tokens=True)[0]
+
+    @torch.no_grad()
+    def extract(self, image, entity_name=None):
+        if isinstance(image, str):
+            image = Image.open(image).convert("RGB")
+
+        raw_text = self._generate(image, "<OCR>")
+        return self._parse_output(raw_text, entity_name)
+
+    @torch.no_grad()
+    def extract_all_specs(self, image):
+        """Extract all visible specs from image using OCR then parsing."""
+        if isinstance(image, str):
+            image = Image.open(image).convert("RGB")
+
+        raw_text = self._generate(image, "<OCR>")
+        specs = self._parse_all_values(raw_text)
+
+        return {
+            "raw_ocr": raw_text,
+            "specs": specs,
+        }
 
     def _parse_output(self, text, entity_name=None):
-        import re
         text = text.strip()
-
         match = re.match(r"([\d.]+)\s*(.+)", text)
         if match:
             return {
@@ -93,5 +119,25 @@ class Florence2Extractor:
                 "unit": match.group(2).strip(),
                 "raw": text,
             }
-
         return {"entity_name": entity_name, "value": None, "unit": None, "raw": text}
+
+    def _parse_all_values(self, text):
+        """Find all number+unit pairs in text."""
+        units_re = "|".join(re.escape(u) for u in sorted(UNIT_PATTERNS, key=len, reverse=True))
+        pattern = rf"([\d,.]+)\s*({units_re})\b"
+        matches = re.findall(pattern, text, re.IGNORECASE)
+
+        specs = []
+        seen = set()
+        for value_str, unit in matches:
+            value_str = value_str.replace(",", "")
+            try:
+                value = float(value_str)
+            except ValueError:
+                continue
+            key = (value, unit.lower())
+            if key not in seen:
+                seen.add(key)
+                specs.append({"value": value, "unit": unit})
+
+        return specs

@@ -53,24 +53,19 @@ def _url_to_image_path(url):
 
 def extract_attributes(image):
     if image is None:
-        return "Upload an image first."
+        return "{}"
 
     if DEMO_MODE:
-        return json.dumps({"note": "Demo mode - no model loaded", "example": {"value": 1.5, "unit": "kilogram"}}, indent=2)
+        return json.dumps({"note": "Demo mode"}, indent=2)
 
     result = pipeline.extractor.extract_all(image)
+    output = {"raw_ocr_output": result["raw_ocr"]}
 
-    if result["value"] is not None:
-        output = {
-            "extracted_text": result["raw"],
-            "value": result["value"],
-            "unit": result["unit"],
-        }
+    if result["specs"]:
+        for i, spec in enumerate(result["specs"]):
+            output[f"spec_{i+1}"] = f"{spec['value']} {spec['unit']}"
     else:
-        output = {
-            "extracted_text": result["raw"],
-            "note": "Could not parse a numeric value from this image",
-        }
+        output["note"] = "No numeric specs detected in image"
 
     return json.dumps(output, indent=2)
 
@@ -80,7 +75,7 @@ def find_similar(image):
         return [], "Upload an image first."
 
     if DEMO_MODE:
-        return [], "Demo mode - build FAISS index to enable search."
+        return [], "Demo mode."
 
     results = pipeline.matcher.find_similar(image, top_k=10)
 
@@ -95,7 +90,7 @@ def find_similar(image):
         if img_path and img_path.exists():
             try:
                 pil_img = Image.open(img_path).convert("RGB")
-                gallery_images.append((pil_img, f"#{i+1} ({r['similarity']:.3f})"))
+                gallery_images.append((pil_img, f"#{i+1} sim={r['similarity']:.3f}"))
             except Exception:
                 pass
 
@@ -124,24 +119,26 @@ def compare_products(image_a, image_b):
     result_a = pipeline.extractor.extract_all(image_a)
     result_b = pipeline.extractor.extract_all(image_b)
 
-    comparison = [{
-        "": "Extracted Text",
-        "Product A": result_a.get("raw", "N/A"),
-        "Product B": result_b.get("raw", "N/A"),
-    }, {
-        "": "Parsed Value",
-        "Product A": f"{result_a.get('value', 'N/A')} {result_a.get('unit', '')}".strip(),
-        "Product B": f"{result_b.get('value', 'N/A')} {result_b.get('unit', '')}".strip(),
-    }]
+    rows = [{"": "OCR Output", "Product A": result_a["raw_ocr"], "Product B": result_b["raw_ocr"]}]
 
-    df = pd.DataFrame(comparison)
+    max_specs = max(len(result_a["specs"]), len(result_b["specs"]))
+    for i in range(max_specs):
+        a_spec = result_a["specs"][i] if i < len(result_a["specs"]) else None
+        b_spec = result_b["specs"][i] if i < len(result_b["specs"]) else None
+        rows.append({
+            "": f"Spec {i+1}",
+            "Product A": f"{a_spec['value']} {a_spec['unit']}" if a_spec else "-",
+            "Product B": f"{b_spec['value']} {b_spec['unit']}" if b_spec else "-",
+        })
+
+    df = pd.DataFrame(rows)
 
     if similarity > 0.85:
-        verdict = "Likely the same product"
+        verdict = "Likely the same product category"
     elif similarity > 0.65:
-        verdict = "Similar products"
+        verdict = "Related products"
     else:
-        verdict = "Different products"
+        verdict = "Different product types"
 
     score_html = f"<h3>Embedding Similarity: {similarity:.2%} — {verdict}</h3>"
     return df, score_html
@@ -193,14 +190,14 @@ def build_app():
             gr.Markdown("""
 ### Florence-2 (Attribute Extraction)
 - **Model**: microsoft/Florence-2-large with LoRA (rank 32, 0.9% trainable params)
-- **Training**: 10,000 steps, batch 4 × 8 gradient accumulation = effective 32
+- **Training**: 10,000 steps, batch 4 x 8 gradient accumulation = effective 32
 - **Final loss**: 2.03 (train), 2.00 (val)
 - **Hardware**: NVIDIA T4, ~3.5 hours
 
 ### SigLIP Contrastive (Product Similarity)
-- **Model**: google/siglip-base-patch16-224 + projection head (768→512→256)
+- **Model**: google/siglip-base-patch16-224 + projection head (768 -> 512 -> 256)
 - **Training**: 12 epochs (3 frozen + 9 fine-tuned), SupCon loss
-- **Final loss**: 4.54 (train), 4.52 (val) — theoretical floor ~4.84
+- **Final loss**: 4.54 (train), 4.52 (val)
 - **Hardware**: NVIDIA T4, ~24 hours
 
 ### FAISS Index

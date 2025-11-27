@@ -23,7 +23,7 @@ class ProductMatcher:
         self.embedder.eval()
 
         self.index = faiss.read_index(index_path)
-        self.db = sqlite3.connect(metadata_path)
+        self.db = sqlite3.connect(metadata_path, check_same_thread=False)
 
     def find_similar(self, image, top_k=10):
         """Find top-K similar products for a query image."""
