@@ -42,21 +42,43 @@ def parse_entity_value(raw_value):
 
 
 def build_records(df):
-    """Convert dataframe rows into structured records."""
-    records = []
+    """Convert dataframe rows into structured records, one per image with all attributes grouped."""
+    from collections import defaultdict
+
+    image_attrs = defaultdict(list)
+    image_meta = {}
+
     for _, row in df.iterrows():
         value, unit = parse_entity_value(row.get("entity_value"))
+        if value is None:
+            continue
 
-        record = {
-            "index": int(row.name) if hasattr(row, "name") else len(records),
-            "image_link": row["image_link"],
-            "group_id": row.get("group_id", ""),
+        img = row["image_link"]
+        image_attrs[img].append({
             "entity_name": row["entity_name"],
-            "raw_value": str(row.get("entity_value", "")),
             "value": value,
             "unit": unit,
+        })
+        image_meta[img] = {
+            "group_id": row.get("group_id", ""),
+            "entity_name": row["entity_name"],
         }
-        records.append(record)
+
+    records = []
+    for img, attrs in image_attrs.items():
+        target_parts = [f"{a['entity_name']}: {a['value']} {a['unit']}" for a in attrs]
+        records.append({
+            "index": len(records),
+            "image_link": img,
+            "group_id": image_meta[img]["group_id"],
+            "entity_name": image_meta[img]["entity_name"],
+            "attributes": attrs,
+            "target": " | ".join(target_parts),
+        })
+
+    multi = sum(1 for r in records if len(r["attributes"]) > 1)
+    print(f"Images with multiple attributes: {multi}/{len(records)} ({100*multi/len(records):.1f}%)")
+
     return records
 
 

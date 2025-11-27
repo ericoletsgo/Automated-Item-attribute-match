@@ -97,21 +97,18 @@ class Florence2Extractor:
 
     @torch.no_grad()
     def extract_all_specs(self, image):
-        """Extract specs using fine-tuned model for primary value, base model for full OCR."""
+        """Extract all product specs from image."""
         if isinstance(image, str):
             image = Image.open(image).convert("RGB")
 
-        primary = self._generate(image, "<OCR>")
+        raw = self._generate(image, "<OCR>", max_tokens=512)
+        specs = self._parse_structured_output(raw)
 
-        self.model.disable_adapter_layers()
-        full_ocr = self._generate(image, "<OCR>", max_tokens=512)
-        self.model.enable_adapter_layers()
-
-        specs = self._parse_all_values(full_ocr)
+        if not specs:
+            specs = self._parse_all_values(raw)
 
         return {
-            "primary_extraction": primary,
-            "full_ocr": full_ocr,
+            "raw_output": raw,
             "specs": specs,
         }
 
@@ -126,6 +123,25 @@ class Florence2Extractor:
                 "raw": text,
             }
         return {"entity_name": entity_name, "value": None, "unit": None, "raw": text}
+
+    def _parse_structured_output(self, text):
+        """Parse 'entity_name: value unit | entity_name: value unit' format."""
+        parts = text.split("|")
+        specs = []
+        for part in parts:
+            part = part.strip()
+            match = re.match(r"(\w+(?:\s\w+)*):\s*([\d,.]+)\s*(.+)", part)
+            if match:
+                try:
+                    value = float(match.group(2).replace(",", ""))
+                except ValueError:
+                    continue
+                specs.append({
+                    "attribute": match.group(1).strip(),
+                    "value": value,
+                    "unit": match.group(3).strip(),
+                })
+        return specs
 
     def _parse_all_values(self, text):
         """Find all number+unit pairs in text."""

@@ -33,7 +33,7 @@ class Florence2Dataset(Dataset):
             image = Image.new("RGB", (768, 768))
 
         prompt = "<OCR>"
-        target = f"{record['value']} {record['unit']}"
+        target = record.get("target", f"{record.get('value', '')} {record.get('unit', '')}")
 
         inputs = self.processor(
             text=prompt,
@@ -44,7 +44,7 @@ class Florence2Dataset(Dataset):
         labels = self.processor.tokenizer(
             target,
             return_tensors="pt",
-            max_length=64,
+            max_length=128,
             padding="max_length",
             truncation=True,
         )

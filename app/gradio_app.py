@@ -59,15 +59,14 @@ def extract_attributes(image):
         return json.dumps({"note": "Demo mode"}, indent=2)
 
     result = pipeline.extractor.extract_all(image)
-    output = {
-        "primary_value": result["primary_extraction"],
-        "all_text_detected": result["full_ocr"],
-    }
+    output = {"raw_model_output": result["raw_output"]}
 
     if result["specs"]:
-        output["parsed_specs"] = [f"{s['value']} {s['unit']}" for s in result["specs"]]
+        for spec in result["specs"]:
+            label = spec.get("attribute", "spec")
+            output[label] = f"{spec['value']} {spec['unit']}"
     else:
-        output["parsed_specs"] = []
+        output["note"] = "No specs detected"
 
     return json.dumps(output, indent=2)
 
@@ -122,18 +121,25 @@ def compare_products(image_a, image_b):
     result_b = pipeline.extractor.extract_all(image_b)
 
     rows = [
-        {"": "Primary Value", "Product A": result_a["primary_extraction"], "Product B": result_b["primary_extraction"]},
-        {"": "Full OCR", "Product A": result_a["full_ocr"], "Product B": result_b["full_ocr"]},
+        {"": "Raw Output", "Product A": result_a["raw_output"], "Product B": result_b["raw_output"]},
     ]
 
-    max_specs = max(len(result_a["specs"]), len(result_b["specs"]))
-    for i in range(max_specs):
-        a_spec = result_a["specs"][i] if i < len(result_a["specs"]) else None
-        b_spec = result_b["specs"][i] if i < len(result_b["specs"]) else None
+    all_attrs = set()
+    a_map, b_map = {}, {}
+    for s in result_a["specs"]:
+        key = s.get("attribute", f"spec")
+        a_map[key] = f"{s['value']} {s['unit']}"
+        all_attrs.add(key)
+    for s in result_b["specs"]:
+        key = s.get("attribute", f"spec")
+        b_map[key] = f"{s['value']} {s['unit']}"
+        all_attrs.add(key)
+
+    for attr in sorted(all_attrs):
         rows.append({
-            "": f"Spec {i+1}",
-            "Product A": f"{a_spec['value']} {a_spec['unit']}" if a_spec else "-",
-            "Product B": f"{b_spec['value']} {b_spec['unit']}" if b_spec else "-",
+            "": attr,
+            "Product A": a_map.get(attr, "-"),
+            "Product B": b_map.get(attr, "-"),
         })
 
     df = pd.DataFrame(rows)
