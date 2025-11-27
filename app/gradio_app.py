@@ -59,13 +59,15 @@ def extract_attributes(image):
         return json.dumps({"note": "Demo mode"}, indent=2)
 
     result = pipeline.extractor.extract_all(image)
-    output = {"raw_ocr_output": result["raw_ocr"]}
+    output = {
+        "primary_value": result["primary_extraction"],
+        "all_text_detected": result["full_ocr"],
+    }
 
     if result["specs"]:
-        for i, spec in enumerate(result["specs"]):
-            output[f"spec_{i+1}"] = f"{spec['value']} {spec['unit']}"
+        output["parsed_specs"] = [f"{s['value']} {s['unit']}" for s in result["specs"]]
     else:
-        output["note"] = "No numeric specs detected in image"
+        output["parsed_specs"] = []
 
     return json.dumps(output, indent=2)
 
@@ -119,7 +121,10 @@ def compare_products(image_a, image_b):
     result_a = pipeline.extractor.extract_all(image_a)
     result_b = pipeline.extractor.extract_all(image_b)
 
-    rows = [{"": "OCR Output", "Product A": result_a["raw_ocr"], "Product B": result_b["raw_ocr"]}]
+    rows = [
+        {"": "Primary Value", "Product A": result_a["primary_extraction"], "Product B": result_b["primary_extraction"]},
+        {"": "Full OCR", "Product A": result_a["full_ocr"], "Product B": result_b["full_ocr"]},
+    ]
 
     max_specs = max(len(result_a["specs"]), len(result_b["specs"]))
     for i in range(max_specs):

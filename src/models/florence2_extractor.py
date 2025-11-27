@@ -97,15 +97,21 @@ class Florence2Extractor:
 
     @torch.no_grad()
     def extract_all_specs(self, image):
-        """Extract all visible specs from image using OCR then parsing."""
+        """Extract specs using fine-tuned model for primary value, base model for full OCR."""
         if isinstance(image, str):
             image = Image.open(image).convert("RGB")
 
-        raw_text = self._generate(image, "<OCR>")
-        specs = self._parse_all_values(raw_text)
+        primary = self._generate(image, "<OCR>")
+
+        self.model.disable_adapter_layers()
+        full_ocr = self._generate(image, "<OCR>", max_tokens=512)
+        self.model.enable_adapter_layers()
+
+        specs = self._parse_all_values(full_ocr)
 
         return {
-            "raw_ocr": raw_text,
+            "primary_extraction": primary,
+            "full_ocr": full_ocr,
             "specs": specs,
         }
 
