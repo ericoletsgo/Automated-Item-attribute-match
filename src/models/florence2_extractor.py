@@ -97,19 +97,40 @@ class Florence2Extractor:
 
     @torch.no_grad()
     def extract_all_specs(self, image):
-        """Extract all product specs from image."""
+        """Extract specs using fine-tuned model + base model full OCR."""
         if isinstance(image, str):
             image = Image.open(image).convert("RGB")
 
-        raw = self._generate(image, "<OCR>", max_tokens=512)
-        specs = self._parse_structured_output(raw)
+        finetuned_output = self._generate(image, "<OCR>")
+        finetuned_specs = self._parse_structured_output(finetuned_output)
+        if not finetuned_specs:
+            finetuned_specs = self._parse_all_values(finetuned_output)
 
-        if not specs:
-            specs = self._parse_all_values(raw)
+        self.model.disable_adapter_layers()
+        ocr_text = self._generate(image, "<OCR>", max_tokens=512)
+        caption = self._generate(image, "<MORE_DETAILED_CAPTION>", max_tokens=512)
+        self.model.enable_adapter_layers()
+
+        ocr_specs = self._parse_all_values(ocr_text + " " + caption)
+
+        seen = set()
+        all_specs = []
+        for spec in finetuned_specs:
+            key = (spec.get("value"), spec.get("unit", "").lower())
+            if key not in seen:
+                seen.add(key)
+                all_specs.append(spec)
+        for spec in ocr_specs:
+            key = (spec.get("value"), spec.get("unit", "").lower())
+            if key not in seen:
+                seen.add(key)
+                all_specs.append(spec)
 
         return {
-            "raw_output": raw,
-            "specs": specs,
+            "finetuned": finetuned_output,
+            "ocr_text": ocr_text,
+            "caption": caption,
+            "specs": all_specs,
         }
 
     def _parse_output(self, text, entity_name=None):

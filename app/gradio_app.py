@@ -59,14 +59,19 @@ def extract_attributes(image):
         return json.dumps({"note": "Demo mode"}, indent=2)
 
     result = pipeline.extractor.extract_all(image)
-    output = {"raw_model_output": result["raw_output"]}
+    output = {
+        "finetuned_extraction": result["finetuned"],
+        "base_ocr": result["ocr_text"],
+    }
 
     if result["specs"]:
-        for spec in result["specs"]:
-            label = spec.get("attribute", "spec")
-            output[label] = f"{spec['value']} {spec['unit']}"
+        specs_dict = {}
+        for i, spec in enumerate(result["specs"]):
+            label = spec.get("attribute", f"spec_{i+1}")
+            specs_dict[label] = f"{spec['value']} {spec['unit']}"
+        output["detected_specs"] = specs_dict
     else:
-        output["note"] = "No specs detected"
+        output["detected_specs"] = "No numeric specs found"
 
     return json.dumps(output, indent=2)
 
@@ -121,7 +126,8 @@ def compare_products(image_a, image_b):
     result_b = pipeline.extractor.extract_all(image_b)
 
     rows = [
-        {"": "Raw Output", "Product A": result_a["raw_output"], "Product B": result_b["raw_output"]},
+        {"": "Fine-tuned", "Product A": result_a["finetuned"], "Product B": result_b["finetuned"]},
+        {"": "Base OCR", "Product A": result_a["ocr_text"], "Product B": result_b["ocr_text"]},
     ]
 
     all_attrs = set()
