@@ -77,13 +77,22 @@ class Florence2Extractor:
         inputs = self.processor(text=prompt, images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        with torch.amp.autocast("cuda"):
-            generated = self.model.generate(
+        if self.device == "cpu":
+            inputs = {k: v.float() if v.dtype == torch.float16 else v for k, v in inputs.items()}
+            generated = self.model.float().generate(
                 **inputs,
                 max_new_tokens=max_tokens,
                 num_beams=3,
                 early_stopping=True,
             )
+        else:
+            with torch.amp.autocast("cuda"):
+                generated = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    num_beams=3,
+                    early_stopping=True,
+                )
 
         return self.processor.batch_decode(generated, skip_special_tokens=True)[0]
 

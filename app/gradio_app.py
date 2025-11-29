@@ -26,6 +26,9 @@ def load_pipeline():
     index_path = Path("data/faiss_index")
     metadata_path = Path("data/metadata.db")
 
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     if all(p.exists() for p in [florence2_path, embedder_path, index_path, metadata_path]):
         from src.inference.pipeline import ProductMatcherPipeline
         pipeline = ProductMatcherPipeline(
@@ -33,10 +36,10 @@ def load_pipeline():
             embedder_path=str(embedder_path),
             index_path=str(index_path),
             metadata_path=str(metadata_path),
-            device="cuda",
+            device=device,
         )
         DEMO_MODE = False
-        print("Models loaded successfully.")
+        print(f"Models loaded on {device}.")
     else:
         missing = [str(p) for p in [florence2_path, embedder_path, index_path, metadata_path] if not p.exists()]
         print(f"Missing: {missing}. Running in demo mode.")
